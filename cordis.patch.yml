@@ -1,0 +1,34 @@
+# dsh-plugin-clawbot — 插件自带 cordis.patch 接入块
+#
+# 该文件由 package.json 的 `dsh.bundle.patch` 引用。当 `dsh plugin add` 作为
+# bundle layer 安装本插件时，DSH 会在 profile 组合中应用本层，自动插入
+# clawbot 插件行并激活通道，无需用户手动配置。
+#
+# config 字段全部可选（缺省值：自动发现微信账号、默认 DSH 地址、
+# ~/.dsh-clawbot 状态目录）。
+#
+# 用户如需覆盖配置，不要在此 insert（避免重复），而是在自己 profile 的
+# cordis.patch.yml 中按 id 覆盖该行（后应用层整体替换 config）：
+#   - id: clawbot
+#     name: 'dsh-plugin-clawbot'
+#     config: { ... }
+- insert:
+    - id: clawbot
+      name: 'dsh-plugin-clawbot'
+      config:
+        dsh:
+          # 发送给 DSH 的会话工作目录（每个微信联系人/群一个独立 DSH 会话）。
+          # 留空则使用 DSH 当前工作目录。
+          cwd: ''
+          # agentPreset: 'default'
+        weixin:
+          # 缺省自动从 ~/.openclaw/openclaw-weixin 发现已绑定的 ClawBot 账号。
+          # accountId: ''
+          # allowFrom: []
+        bridge:
+          # 游标/会话映射/上下文 token 的状态目录（与 OpenClaw 通道互不干扰）。
+          # stateDir: ''
+          # 回复超时（毫秒）
+          replyTimeoutMs: 600000
+          # 长轮询超时（毫秒）
+          pollTimeoutMs: 35000

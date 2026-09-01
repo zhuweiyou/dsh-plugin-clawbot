@@ -1,0 +1,80 @@
+{
+  "name": "dsh-plugin-clawbot",
+  "version": "0.1.0",
+  "description": "WeChat ClawBot channel plugin for DSH: bidirectional chat bridge plus QR-code (re)login and account binding",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./manager": "./lib/manager.js",
+    "./weixin": "./lib/weixin.js",
+    "./dsh": "./lib/dsh.js",
+    "./state": "./lib/state.js",
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "cordis.patch.yml",
+    "assets"
+  ],
+  "scripts": {
+    "build": "node scripts/build-host.mjs && tsdown",
+    "build:host": "node scripts/build-host.mjs",
+    "build:client": "tsdown",
+    "prepublishOnly": "npm run build"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-settings": ">=0.1.0-rc.2",
+    "@deepseek-ai/schemastery": ">=3.18.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0",
+    "@deepseek-ai/dsh-settings": ">=0.1.0-rc.2",
+    "@deepseek-ai/schemastery": ">=3.18.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhuweiyou/dsh-plugin-clawbot.git"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "wechat",
+    "clawbot",
+    "openclaw",
+    "weixin"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "@types/react": "^19.2.18",
+    "esbuild": "^0.28.2",
+    "lightningcss": "^1.33.0",
+    "react": "^19.2.8",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2"
+  }
+}

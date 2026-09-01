@@ -1,0 +1,71 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v0.1.0)'
+        required: true
+        type: string
+      description:
+        description: 'Release description'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Create and push tag
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists locally"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+      - name: Package plugin tarball
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          RELEASE_VERSION="${VERSION#v}"
+          # npm pack ships only the runtime artifacts listed in package.json
+          # "files" (lib/, client/, cordis.patch.yml, assets/) — exactly what
+          # `dsh plugin add <url>` needs. The generated tarball is named
+          # dsh-plugin-clawbot-<npm-version>.tgz (leading "v" stripped to
+          # match npm naming).
+          npm pack
+          mv dsh-plugin-clawbot-*.tgz dsh-plugin-clawbot-$RELEASE_VERSION.tgz
+          ls -la *.tgz
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: ${{ github.event.inputs.version }}
+          body: ${{ github.event.inputs.description }}
+          files: dsh-plugin-clawbot-*.tgz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
