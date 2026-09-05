@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-clawbot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "WeChat ClawBot channel plugin for DSH: bidirectional chat bridge plus QR-code (re)login and account binding",
   "type": "module",
   "main": "lib/index.js",
@@ -17,8 +17,7 @@
   "files": [
     "lib",
     "client",
-    "cordis.patch.yml",
-    "assets"
+    "cordis.patch.yml"
   ],
   "scripts": {
     "build": "node scripts/build-host.mjs && tsdown",
