@@ -15,12 +15,12 @@
  */
 import { ClawbotManager } from './manager.js';
 import { loadConfig } from './config.js';
-import { createDshClient, createInProcessDshClient } from './dsh.js';
+import { createAgentsDshClient, createDshClient, createInProcessDshClient, createSessionControllerDshClient } from './dsh.js';
 import { renderPage } from './ui.js';
 import { installClawbotSettings } from './settings.js';
 
 export const name = 'clawbot';
-export const inject = ['webServer'];
+export const inject = ['webServer', 'agents'];
 
 /** Merge the loader-provided row config over env/file defaults + discovery. */
 function normalizeConfig(pluginCfg = {}) {
@@ -133,19 +133,53 @@ export function apply(ctx, config) {
   };
 
   // As a Cordis plugin running inside the DSH host we build the DSH API
-  // client IN-PROCESS via the host's `apiProxy` service (the same bridge DSH's
-  // own web frontend uses, called directly — no HTTP, no auth header). That
-  // never touches an HTTP server, so it cannot be rejected by an outer
-  // proxy's HTTP 401/403. Transport is chosen lazily on first use (by then the
-  // host is fully booted and `apiProxy` is present); when the host exposes no
-  // apiProxy at all we fall back to the classic HTTP client (older DSH, or
-  // standalone/library use of the plugin).
+  // client IN-PROCESS — never hand-rolled HTTP to `127.0.0.1:3080` (that
+  // needs a browser-auth cookie and can be rejected by an outer proxy's
+  // HTTP 401/403). Resolution order:
+  //   1. `sessionController` — the official full path (composeAgent + preset
+  //      mount + durable sessionQuery), same one the DSH web UI uses
+  //   2. `agents`            — dsh-memory-evolve surface (create/resume/followup)
+  //   3. legacy `apiProxy`   — older DSH in-process bridge (sessions.*)
+  //   4. HTTP client         — standalone/library use, or hosts with neither
+  // Transport is chosen lazily on first use (by then the host is fully
+  // booted and the services are present).
   const cfg = normalizeConfig(config);
   let resolvedDsh = null;
   const resolveDsh = async () => {
     if (resolvedDsh) return resolvedDsh;
-    // The host's `apiProxy` service may still be booting when the plugin
-    // starts; give it a short grace window before committing to HTTP.
+    // 1. sessionController — the SAME full path the DSH web UI itself uses
+    //    (composeAgent + preset mount + durable sessionQuery registration).
+    //    `agents.create` alone is a bare create: no persistence, no preset,
+    //    no query row — the UI history page then fails with
+    //    `session/not-found` and WeChat gets an empty reply.
+    let sessionController;
+    for (let attempt = 0; attempt < 6 && sessionController === void 0; attempt += 1) {
+      sessionController = ctx.get('sessionController');
+      if (sessionController === void 0 && attempt < 5) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+    if (sessionController !== void 0) {
+      resolvedDsh = createSessionControllerDshClient(sessionController, { log: (l) => log('debug', `[dsh] ${l}`) });
+      log('info', 'DSH API client: in-process (sessionController)');
+      return resolvedDsh;
+    }
+    // 2. agents — dsh-memory-evolve surface (create/resume/followup) as a
+    //    fallback for hosts that mount `agents` without the controller.
+    const agents = ctx.get('agents');
+    if (agents !== void 0) {
+      resolvedDsh = createAgentsDshClient(agents, {
+        log: (l) => log('debug', `[dsh] ${l}`),
+        // Optional host services looked up lazily at first use; each degrades
+        // to the next source when absent (see createAgentsDshClient).
+        agentPresets: ctx.get('agentPresets'),
+        defaultModel: ctx.get('agentDefaultModel'),
+        sessionController: ctx.get('sessionController'),
+      });
+      log('info', 'DSH API client: in-process (agents)');
+      return resolvedDsh;
+    }
+    // Legacy fallback: old DSH versions exposed an `apiProxy` service.
     let apiProxy;
     for (let attempt = 0; attempt < 6 && apiProxy === void 0; attempt += 1) {
       apiProxy = ctx.get('apiProxy');

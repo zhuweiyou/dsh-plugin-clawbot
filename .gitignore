@@ -4,6 +4,8 @@ node_modules/
 # Build artifacts (generated from src/ by `npm run build`)
 /lib/
 /client/
+# `npm pack` output (any version: dsh-plugin-clawbot-*.tgz)
+/dsh-plugin-clawbot-*.tgz
 
 # Environment files and local secrets
 .env
