@@ -88,7 +88,7 @@ const LOGIN_LABELS = {
   verify_code_blocked: '\u914D\u5BF9\u7801\u591A\u6B21\u9519\u8BEF\uFF0C\u5DF2\u5237\u65B0\u4E8C\u7EF4\u7801',
   scaned_but_redirect: '\u6B63\u5728\u5207\u6362\u8282\u70B9\u2026', 'already-connected': '\u8BE5\u5FAE\u4FE1\u5DF2\u7ED1\u5B9A\u8FC7\u672C\u673A',
 };
-const QR_IMG = (u) => 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=' + encodeURIComponent(u);
+const QR_IMG = (u) => 'https://qun.qq.com/qrcode/index?data=' + encodeURIComponent(u) + '&size=560';
 
 async function api(path, body) {
   const res = await fetch(path, {

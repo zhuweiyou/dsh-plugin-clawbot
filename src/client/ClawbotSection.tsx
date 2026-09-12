@@ -248,7 +248,7 @@ export function ClawbotSection({ t }: { t: Translate }) {
         <div style={styles.card}>
           <h3 style={styles.cardTitle}>{t('loginCardTitle')}</h3>
           <img
-            src={`https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qrUrl!)}`}
+            src={`https://qun.qq.com/qrcode/index?data=${encodeURIComponent(qrUrl!)}&size=560`}
             style={styles.qrImg}
             alt="QR"
           />
