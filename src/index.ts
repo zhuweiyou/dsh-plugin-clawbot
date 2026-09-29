@@ -16,8 +16,6 @@
 import { ClawbotManager } from './manager.js';
 import { loadConfig } from './config.js';
 import { createAgentsDshClient, createDshClient, createInProcessDshClient, createSessionControllerDshClient } from './dsh.js';
-import { renderPage } from './ui.js';
-import { installClawbotSettings } from './settings.js';
 
 export const name = 'clawbot';
 export const inject = ['webServer', 'agents'];
@@ -226,11 +224,6 @@ export function apply(ctx, config) {
       return root.on('session/event', callback);
     },
   });
-
-  // Expose the user-editable subset on the DSH settings page. No-ops when a
-  // host has no settings service (installSettingsSection rides the scoped
-  // fiber and simply never runs there).
-  installClawbotSettings(ctx, manager.cfg.dsh);
 
   route('GET', '/clawbot/api/status', async (req, res) => {
     sendJson(res, 200, manager.getStatus());
