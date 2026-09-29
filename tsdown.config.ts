@@ -29,8 +29,10 @@ export default defineConfig({
   dts: false,
   sourcemap: false,
   clean: false,
-  external: [...CLIENT_EXTERNALS],
-  noExternal: (source: string) => (CLIENT_EXTERNALS.includes(source) ? undefined : true),
+  deps: {
+    neverBundle: [...CLIENT_EXTERNALS],
+    alwaysBundle: (source: string) => (CLIENT_EXTERNALS.includes(source) ? undefined : true),
+  },
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),
     'import.meta.env.MODE': JSON.stringify('production'),

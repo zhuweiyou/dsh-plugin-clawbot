@@ -14,9 +14,10 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 
-import { createWeixinClient, messageBody, MessageType } from './weixin.js';
+import { createWeixinClient, messageBody, MessageItemType, MessageType } from './weixin.js';
 import { createDshClient } from './dsh.js';
 import { ChannelState } from './state.js';
+import { catalogEntries, resolveModel, splitMessage } from './models.js';
 import { OPENCLAW_HOME, discoverAccount, saveAccount, clearAccount, clearStaleAccountsForUserId, localTokenList } from './config.js';
 
 const STALE_TOKEN_ERRCODE = -14; // session timeout → token expired, QR re-login needed
@@ -80,6 +81,7 @@ export class ClawbotManager {
     this.wxCfg = cfg.weixin;
     this.brCfg = cfg.bridge;
     this.eventBus = opts.eventBus;
+    this.imageLimits = opts.imageLimits;
     this.logFn = opts.log ?? ((level, msg) => {
       if (level === 'debug') return;
       console[level === 'error' ? 'error' : 'log'](`[${new Date().toISOString()}] [${level}] ${msg}`);
@@ -341,6 +343,9 @@ export class ClawbotManager {
     }
 
     const text = messageBody(msg);
+    const imageItems = (msg.item_list ?? []).filter((item) => item?.type === MessageItemType.IMAGE);
+    const voiceWithoutText = (msg.item_list ?? []).some((item) =>
+      item?.type === MessageItemType.VOICE && !String(item.voice_item?.text ?? '').trim());
     const peerKey = peerKeyOf(msg);
     const contextToken = msg.context_token ?? this.contextTokens[fromUserId];
     if (contextToken) {
@@ -351,7 +356,7 @@ export class ClawbotManager {
     this.log('info', `inbound from=${fromUserId} peer=${peerKey} items=${msg.item_list?.map((i) => i.type).join(',') ?? 'none'} textLen=${text.length}`);
 
     const prev = this.peerQueues.get(peerKey) ?? Promise.resolve();
-    const next = prev.then(() => this.#processForPeer({ peerKey, fromUserId, text, contextToken }));
+    const next = prev.then(() => this.#processForPeer({ peerKey, fromUserId, text, items: msg.item_list ?? [], imageItems, voiceWithoutText, contextToken }));
     this.peerQueues.set(peerKey, next.catch((err) => {
       this.log('error', `[${peerKey}] processForPeer failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
     }));
@@ -363,18 +368,27 @@ export class ClawbotManager {
     }
   }
 
-  async #processForPeer({ peerKey, fromUserId, text, contextToken }) {
-    if (text === '') {
-      await this.#safeSend(fromUserId, '暂不支持该类型消息（仅支持文本）。', contextToken);
+  async #processForPeer({ peerKey, fromUserId, text, items, imageItems, voiceWithoutText, contextToken }) {
+    if (voiceWithoutText) {
+      await this.#safeSend(fromUserId, '这条语音没有可用的微信转写，请改用文字或开启微信语音转文字后重试。', contextToken);
+      return;
+    }
+    if (!text.trim() && imageItems.length === 0) {
+      await this.#safeSend(fromUserId, '暂不支持该类型消息（支持文字、图片和有微信转写的语音）。', contextToken);
       return;
     }
 
     const trimmed = text.trim();
-    if (trimmed === '/help') {
-      await this.#safeSend(fromUserId, '可用命令：\n/new — 开启新会话\n/reset — 重置当前会话\n其他内容将发送给 DSH 智能体。', contextToken);
+    if (imageItems.length === 0 && trimmed === '/help') {
+      await this.#safeSend(fromUserId, '可用命令：\n/new — 开启新会话\n/reset — 重置当前会话\n/model — 查看可用模型\n/model <序号或 provider/model-id> — 切换模型\n其他内容将发送给 DSH 智能体。', contextToken);
       return;
     }
-    if (trimmed === '/new' || trimmed === '/reset') {
+    const modelCommand = imageItems.length === 0 ? /^\/model(?:[ \t]+(.*))?$/u.exec(trimmed) : null;
+    if (modelCommand) {
+      await this.#handleModelCommand({ peerKey, fromUserId, input: modelCommand[1], contextToken });
+      return;
+    }
+    if (imageItems.length === 0 && (trimmed === '/new' || trimmed === '/reset')) {
       this.state.removeSessionMapEntry(peerKey);
       const session = await this.dsh.createSession({
         cwd: this.dshCfg.cwd,
@@ -387,14 +401,41 @@ export class ClawbotManager {
       return;
     }
 
+    let content;
+    try {
+      const limits = this.imageLimits;
+      if (imageItems.length && (!limits || imageItems.length > limits.maxImagesPerMessage)) {
+        throw new Error('图片数量超出当前 DSH 的限制，或图片附件服务不可用');
+      }
+      content = [];
+      let imageBytes = 0;
+      for (const item of items) {
+        if (item?.type === MessageItemType.IMAGE) {
+          const maxBytes = Math.min(limits.maxImageBytes, limits.maxMessageImageBytes - imageBytes);
+          if (maxBytes <= 0) throw new Error('图片总大小超过当前 DSH 的限制');
+          const image = await this.weixin.downloadImage(item, { maxBytes, signal: this.abort.signal });
+          imageBytes += image.data.byteLength;
+          content.push({ type: 'image', mediaType: image.mediaType, data: image.data.toString('base64') });
+        } else {
+          const part = messageBody({ item_list: [item] });
+          if (part.trim()) content.push({ type: 'text', text: part });
+        }
+      }
+      if (content.length === 0) throw new Error('没有可发送给 DSH 的消息内容');
+    } catch (error) {
+      this.log('warn', `[${peerKey}] 图片处理失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      await this.#safeSend(fromUserId, `（图片处理失败：${error instanceof Error ? error.message : '未知错误'}）`, contextToken);
+      return;
+    }
+
     let sessionId = this.state.loadSessionMap()[peerKey]?.sessionId;
     if (!sessionId) sessionId = await this.#ensureSession(peerKey);
 
-    this.log('info', `[${peerKey}] -> dsh session ${sessionId}: ${text.slice(0, 120)}`);
+    this.log('info', `[${peerKey}] -> dsh session ${sessionId}: ${text.slice(0, 120)} images=${imageItems.length}`);
 
     const watcher = this.#createWatcher(sessionId);
     try {
-      await this.dsh.prompt(sessionId, text);
+      await this.dsh.prompt(sessionId, imageItems.length ? content : text);
     } catch (err) {
       watcher.cancel();
       this.log('error', `[${peerKey}] prompt failed: ${String(err)}`);
@@ -405,6 +446,65 @@ export class ClawbotManager {
     const reply = await watcher.promise;
     this.log('info', `[${peerKey}] <- reply ${reply.length} chars`);
     await this.#safeSend(fromUserId, reply, contextToken);
+  }
+
+  async #handleModelCommand({ peerKey, fromUserId, input, contextToken }) {
+    const sendLines = async (lines) => {
+      for (const chunk of splitMessage(lines)) await this.#safeSend(fromUserId, chunk, contextToken);
+    };
+    let catalog;
+    try {
+      catalog = await this.dsh.modelCatalog();
+    } catch (error) {
+      this.log('warn', `[${peerKey}] model catalog unavailable: ${String(error)}`);
+      await this.#safeSend(fromUserId, '当前 DSH 版本不支持微信切换模型，或模型列表暂不可用。', contextToken);
+      return;
+    }
+    const entries = catalogEntries(catalog);
+    if (input === undefined || !input.trim()) {
+      const sessionId = this.state.loadSessionMap()[peerKey]?.sessionId;
+      let selected = catalog.default;
+      if (sessionId) {
+        try {
+          selected = await this.dsh.getSessionModel(sessionId) ?? catalog.default;
+        } catch (error) {
+          this.log('warn', `[${peerKey}] model selection unavailable: ${String(error)}`);
+          await this.#safeSend(fromUserId, '当前 DSH 版本不支持微信读取会话模型，或会话暂不可用。', contextToken);
+          return;
+        }
+      }
+      const current = selected ? `${selected.provider}/${selected.model}${selected.reasoningEffort ? ` (${selected.reasoningEffort})` : ''}` : '未知';
+      const lines = [
+        sessionId ? `当前会话模型：${current}` : `尚无会话，部署默认模型：${current}`,
+        ...entries.length ? entries.map((entry) => `${entry.index}. ${entry.provider}/${entry.model}${entry.modelName !== entry.model ? ` — ${entry.modelName}` : ''}`) : ['当前没有可选模型。'],
+        ...(catalog.failures ?? []).map((failure) => `暂不可用：${failure.id}`),
+        '发送 /model <序号、唯一模型 ID 或 provider/model-id> 切换。切换也会更新 DSH 的部署默认模型。',
+      ];
+      await sendLines(lines);
+      return;
+    }
+    const match = resolveModel(input, entries);
+    if (match.kind !== 'selected') {
+      const candidates = match.kind === 'ambiguous'
+        ? match.candidates.map((entry) => `${entry.provider}/${entry.model}`)
+        : [];
+      await sendLines([
+        match.kind === 'ambiguous' ? '模型 ID 在多个 provider 中重复，请写完整的 provider/model-id：' : '未找到指定模型，当前选择未改变。',
+        ...candidates,
+        '用法：/model <序号、唯一模型 ID 或 provider/model-id>；发送 /model 查看实时清单。',
+      ]);
+      return;
+    }
+    try {
+      let sessionId = this.state.loadSessionMap()[peerKey]?.sessionId;
+      if (!sessionId) sessionId = await this.#ensureSession(peerKey);
+      const { selected } = await this.dsh.selectModel(sessionId, match.entry.provider, match.entry.model);
+      await this.#safeSend(fromUserId,
+        `已切换为 ${selected.provider}/${selected.model}${selected.reasoningEffort ? ` (${selected.reasoningEffort})` : ''}。新模型从下一次模型请求生效；DSH 部署默认模型也会同步更新。`, contextToken);
+    } catch (error) {
+      this.log('warn', `[${peerKey}] model selection failed: ${String(error)}`);
+      await this.#safeSend(fromUserId, '模型切换失败：模型可能已下线、会话不可用或当前 DSH 不支持该操作；原选择未改变。', contextToken);
+    }
   }
 
   async #ensureSession(peerKey) {

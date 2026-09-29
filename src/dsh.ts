@@ -21,6 +21,9 @@ function wireMethod(method) {
 function wirePayload(method, payload) {
   return wireMethod(method) === "session/list" ? { args: { _request: {} } } : { args: { request: payload } };
 }
+function promptContent(input) {
+  return Array.isArray(input) ? input : [{ type: 'text', text: String(input) }];
+}
 /**
  * Build a DSH API client that talks to the host **in-process** — the same
  * bridge DSH's own web frontend uses — instead of hand-rolled HTTP to
@@ -69,10 +72,11 @@ export function createInProcessDshClient(apiProxy, opts = {}) {
       ...sessionId !== void 0 ? { sessionId } : {},
       ...agentPreset !== void 0 ? { agentPreset } : {},
     }),
-    prompt: (sessionId, text) => unwrap('session.prompt', sessions.prompt)({
+    prompt: (sessionId, content) => unwrap('session.prompt', sessions.prompt)({
+      requestId: crypto.randomUUID(),
       sessionId,
       mode: 'queue',
-      content: [{ type: 'text', text }],
+      content: promptContent(content),
     }),
     cancel: (sessionId) => unwrap('session.cancel', sessions.cancel)({ sessionId }),
     listSessions: () => unwrap('session.list', sessions.list)({}),
@@ -217,9 +221,13 @@ export function createAgentsDshClient(agents, opts = {}) {
       const agent = await ensureAgent({ sessionId, cwd, agentPreset });
       return { sessionId: agent.id, ...(agentPreset ? { agentPreset } : {}) };
     },
-    prompt: async (sessionId, text) => {
+    prompt: async (sessionId, content) => {
+      const parts = promptContent(content);
+      if (parts.some((part) => part.type !== 'text')) {
+        throw new DshApiError('当前 DSH agents 回退模式不支持图片输入', 'unsupported-image');
+      }
       const agent = await ensureAgent({ sessionId });
-      agent.followup(userMessage(text));
+      agent.followup(userMessage(parts.map((part) => part.text).join('\n')));
       return { accepted: true, sessionId };
     },
     cancel: async (sessionId) => {
@@ -334,17 +342,32 @@ export function createSessionControllerDshClient(sessionController, opts = {}) {
     // message's `source.rpcId`); omitting it makes `source.rpcId` undefined,
     // which is refused at inbox admission and resurfaces as a generic
     // session/agent-busy "prompt rejected".
-    prompt: (sessionId, text) => withError('session.prompt', (p, s) => sessionController.prompt(p, s))({
+    prompt: (sessionId, content) => withError('session.prompt', (p, s) => sessionController.prompt(p, s))({
       requestId: crypto.randomUUID(),
       sessionId,
       mode: 'queue',
-      content: [{ type: 'text', text }],
+      content: promptContent(content),
     }, neverAbort),
     // sessionController.cancel({ sessionId }) → { accepted }.
     cancel: (sessionId) => withError('session.cancel', (p) => sessionController.cancel(p))({ sessionId }),
     // sessionController.list({}, signal) → { items } — shapes already match
     // the HTTP surface ({ sessionId, cwd, running, blank, ... }).
     listSessions: () => withError('session.list', (p, s) => sessionController.list(p, s))({}, neverAbort),
+    modelCatalog: async () => {
+      if (typeof sessionController.modelCatalog !== 'function') throw new DshApiError('当前 DSH 版本不支持微信切换模型', 'unsupported-model');
+      return withError('session.modelCatalog', () => sessionController.modelCatalog())();
+    },
+    selectModel: async (sessionId, provider, model) => {
+      if (typeof sessionController.selectModel !== 'function') throw new DshApiError('当前 DSH 版本不支持微信切换模型', 'unsupported-model');
+      return withError('session.selectModel', (request) =>
+        sessionController.selectModel(request))({ sessionId, provider, model });
+    },
+    getSessionModel: async (sessionId) => {
+      if (typeof sessionController.projections !== 'function') throw new DshApiError('当前 DSH 版本不支持微信切换模型', 'unsupported-model');
+      const projection = await withError('session.projections', (request, signal) =>
+        sessionController.projections(request, signal))({ sessionId }, neverAbort);
+      return projection?.values?.modelSelection?.next ?? null;
+    },
     openMux: (onFrame, signal, onStatus, opts2 = {}) => {
       if (opts2.eventBus) {
         const disposer = opts2.eventBus((payload) => onFrame(payload));
@@ -401,12 +424,12 @@ function createDshClient(baseUrl, opts = {}) {
       ...agentPreset !== void 0 ? { agentPreset } : {}
     });
   }
-  async function prompt(sessionId, text) {
+  async function prompt(sessionId, content) {
     return call("session.prompt", {
       requestId: crypto.randomUUID(),
       sessionId,
       mode: "queue",
-      content: [{ type: "text", text }]
+      content: promptContent(content)
     });
   }
   async function cancel(sessionId) {
