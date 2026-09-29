@@ -87,7 +87,10 @@ export function createManager(config, opts = {}) {
     if (level === 'debug') return;
     console[level === 'error' ? 'error' : 'log'](`[clawbot] ${msg}`);
   });
-  return new ClawbotManager(cfg, { log, eventBus: opts.eventBus, dsh: opts.dsh, weixinFactory: opts.weixinFactory });
+  return new ClawbotManager(cfg, {
+    log, eventBus: opts.eventBus, dsh: opts.dsh, weixinFactory: opts.weixinFactory,
+    imageLimits: opts.imageLimits,
+  });
 }
 
 export function apply(ctx, config) {
@@ -197,9 +200,24 @@ export function apply(ctx, config) {
   const dsh = {
     call: async (method, payload) => (await resolveDsh()).call(method, payload),
     createSession: async (opts) => (await resolveDsh()).createSession(opts),
-    prompt: async (sessionId, text) => (await resolveDsh()).prompt(sessionId, text),
+    prompt: async (sessionId, content) => (await resolveDsh()).prompt(sessionId, content),
     cancel: async (sessionId) => (await resolveDsh()).cancel(sessionId),
     listSessions: async () => (await resolveDsh()).listSessions(),
+    modelCatalog: async () => {
+      const client = await resolveDsh();
+      if (typeof client.modelCatalog !== 'function') throw new Error('当前 DSH 版本不支持微信切换模型');
+      return client.modelCatalog();
+    },
+    selectModel: async (sessionId, provider, model) => {
+      const client = await resolveDsh();
+      if (typeof client.selectModel !== 'function') throw new Error('当前 DSH 版本不支持微信切换模型');
+      return client.selectModel(sessionId, provider, model);
+    },
+    getSessionModel: async (sessionId) => {
+      const client = await resolveDsh();
+      if (typeof client.getSessionModel !== 'function') throw new Error('当前 DSH 版本不支持微信切换模型');
+      return client.getSessionModel(sessionId);
+    },
     openMux: (onFrame, signal, onStatus, opts4) => (async () => {
       const client = await resolveDsh();
       return client.openMux(onFrame, signal, onStatus, opts4);
@@ -211,6 +229,7 @@ export function apply(ctx, config) {
   manager = createManager(config, {
     log,
     dsh,
+    imageLimits: ctx.get('attachments')?.imageLimits,
     // In-process event source: the plugin runs inside the host, so it listens
     // on the Cordis session/event bus at the ROOT context (the bus is emitted
     // from each session's emitCtx and bubbles to the root). This replaces the

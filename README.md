@@ -45,8 +45,11 @@ dsh web
 ## 消息命令
 
 - `/new`、`/reset` — 为当前联系人开启全新会话
+- `/model` — 列出当前 DSH 可用模型及当前会话选型（无会话时显示部署默认）
+- `/model <序号或模型 ID>` — 切换当前联系人/群聊会话模型；重名模型须写 `provider/model-id`
 - `/help` — 帮助
-- 其他文本 → 发送给 DSH 智能体
+- 文字、图片（可附文字）、带微信转写的语音 → 发送给 DSH 智能体
+- 附图的 `/new`、`/reset`、`/help` 视为普通提问，不会执行命令
 
 ## 结构
 
@@ -55,6 +58,8 @@ src/               TypeScript 源码（Host 半侧）
   index.ts         插件入口
   manager.ts       通道生命周期 / 轮询 / 消息处理 / 登录状态机
   weixin.ts        ClawBot API 客户端（getupdates / sendmessage / 扫码）
+  media.ts         微信 CDN 图片下载、解密与格式校验
+  models.ts        模型清单解读、/model 参数解析与消息分段
   dsh.ts           DSH API 客户端
   config.ts        配置解析 + 账号库
   state.ts         状态持久化
@@ -77,6 +82,7 @@ test/              测试
 ```bash
 npm install        # 安装 devDependencies
 npm run build      # esbuild 编译 Host + tsdown 打包客户端
+npm test           # 构建并运行离线测试
 ```
 
 > 从 GitHub 克隆下来的源码不含构建产物（`lib/`、`client/` 已忽略），
@@ -99,7 +105,9 @@ npm run build      # esbuild 编译 Host + tsdown 打包客户端
 - **不要与 OpenClaw 微信通道同时运行**（共享 getupdates 游标）。
 - 重新扫码绑定后，旧账号文件会被清理（同一微信用户只保留最新账号），
   会话映射与上下文 token 保留，聊天连续性不受影响。
-- 媒体消息（图片 / 语音）目前仅返回"暂不支持"提示；语音若带转写文本则直接使用。
+- 图片经微信 CDN 下载解密后由 DSH 作为图片附件持久化；需要所选模型支持视觉输入。仅支持当前消息的 PNG/JPEG/WebP/GIF 图片，暂不处理引用消息的历史图片。图片下载/解密失败会显式回复，不会只发送附图文字。
+- 语音仅使用微信消息自带的转写文字（`voice_item.text`）；缺少转写时会提示改用文字，不下载或转写音频。文件和视频暂不支持。
+- `/model` 仅在 DSH 提供 `sessionController.modelCatalog` / `selectModel` / `projections` 接口时可用；模型来自 DSH 实时目录，不自行维护清单。切换会话模型**也会异步更新部署默认模型**，可能影响此后创建的其他会话；当前已开始的模型请求不会被中断。
 
 ## License
 

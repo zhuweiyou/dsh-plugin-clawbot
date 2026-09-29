@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { downloadImage } from './media.js';
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 const DEFAULT_ILINK_BOT_TYPE = "3";
 const ILINK_APP_ID = "bot";
@@ -181,31 +182,33 @@ function createWeixinClient(opts = {}) {
       return { status: "wait" };
     }
   }
-  return { getUpdates, sendText, getConfig, sendTyping, notifyStart, notifyStop, getBotQrcode, getQrcodeStatus };
+  return {
+    getUpdates, sendText, getConfig, sendTyping, notifyStart, notifyStop, getBotQrcode, getQrcodeStatus,
+    downloadImage: (item, options) => downloadImage(item.image_item, options),
+  };
 }
 function messageBody(msg) {
-  const items = msg?.item_list ?? [];
-  for (const item of items) {
+  const parts = [];
+  for (const item of msg?.item_list ?? []) {
     if (item?.type === MessageItemType.TEXT && item.text_item?.text != null) {
       const text = String(item.text_item.text);
       const ref = item.ref_msg;
-      if (!ref) return text;
-      if (ref.message_item && isMediaItem(ref.message_item)) return text;
-      const parts = [];
-      if (ref.title) parts.push(ref.title);
+      if (!ref || (ref.message_item && isMediaItem(ref.message_item))) {
+        parts.push(text);
+        continue;
+      }
+      const quoted = [];
+      if (ref.title) quoted.push(ref.title);
       if (ref.message_item) {
         const refBody = messageBody({ item_list: [ref.message_item] });
-        if (refBody) parts.push(refBody);
+        if (refBody) quoted.push(refBody);
       }
-      if (!parts.length) return text;
-      return `[\u5F15\u7528: ${parts.join(" | ")}]
-${text}`;
-    }
-    if (item?.type === MessageItemType.VOICE && item.voice_item?.text) {
-      return item.voice_item.text;
+      parts.push(quoted.length ? `[引用: ${quoted.join(' | ')}]\n${text}` : text);
+    } else if (item?.type === MessageItemType.VOICE && item.voice_item?.text) {
+      parts.push(String(item.voice_item.text));
     }
   }
-  return "";
+  return parts.join('\n');
 }
 function isMediaItem(item) {
   return [MessageItemType.IMAGE, MessageItemType.VIDEO, MessageItemType.FILE, MessageItemType.VOICE].includes(item?.type);

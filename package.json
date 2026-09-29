@@ -23,6 +23,7 @@
     "build": "node scripts/build-host.mjs && tsdown",
     "build:host": "node scripts/build-host.mjs",
     "build:client": "tsdown",
+    "test": "npm run build && node --test test/*.test.mjs",
     "prepublishOnly": "npm run build"
   },
   "dsh": {
