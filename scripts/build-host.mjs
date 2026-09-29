@@ -7,7 +7,7 @@
  * loads directly (same contract as the original handwritten lib/*.js).
  */
 import { build } from 'esbuild'
-import { readdirSync } from 'node:fs'
+import { readdirSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -22,6 +22,9 @@ for (const file of readdirSync(srcDir)) {
     entries[file.slice(0, -3)] = `${srcDir}/${file}`
   }
 }
+
+// Remove stale artifacts when a legacy source module has been deleted.
+rmSync(outDir, { recursive: true, force: true })
 
 await build({
   entryPoints: entries,

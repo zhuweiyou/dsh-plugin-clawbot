@@ -57,7 +57,6 @@ src/               TypeScript 源码（Host 半侧）
   weixin.ts        ClawBot API 客户端（getupdates / sendmessage / 扫码）
   dsh.ts           DSH API 客户端
   config.ts        配置解析 + 账号库
-  settings.ts      旧版设置命名空间（当前入口已停用）
   state.ts         状态持久化
   ui.ts / qr.ts    保留的旧 HTML 渲染（非入口）
 src/client/        React 客户端半侧（浏览器）
