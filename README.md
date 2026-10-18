@@ -1,3 +1,18 @@
+<!-- markdownlint-disable MD033 MD041 -->
+
+<div align="center">
+
+## ⚠️ 本仓库已停止维护
+
+### 建议改用 👉 [xmanrui/dsh-im](https://github.com/xmanrui/dsh-im)
+
+本仓库不再更新、不再接收 Issue / PR。该项目由他人维护（与本仓库无隶属或迁移关系），
+功能更完整、持续更新中，推荐前往获取最新版本、安装说明与支持。
+
+</div>
+
+---
+
 # dsh-plugin-clawbot
 
 DSH（DeepSeek Harness）的**微信 ClawBot 通道插件** —— 与微信 ClawBot
